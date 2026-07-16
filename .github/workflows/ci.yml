@@ -1,0 +1,167 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Lint and test
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            pkg-config \
+            libclang-dev \
+            libxcb1-dev \
+            libxrandr-dev \
+            libdbus-1-dev \
+            libpipewire-0.3-dev \
+            libwayland-dev \
+            libgbm-dev \
+            libegl1-mesa-dev
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Rust build output
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install package and development tools
+        run: python -m pip install --upgrade pip ".[dev]"
+
+      - name: Check Rust formatting
+        run: cargo fmt --all --check
+
+      - name: Lint Rust
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Lint Python
+        run: python -m ruff check python tests
+
+      - name: Type-check Python
+        run: python -m pyright
+
+      - name: Run tests
+        run: python -m pytest
+
+  build-wheels:
+    name: Build ${{ matrix.artifact }} wheel
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            manylinux: "2_28"
+            artifact: linux-x86_64
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            manylinux: "off"
+            artifact: windows-x86_64
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            manylinux: "off"
+            artifact: macos-x86_64
+          - os: macos-15
+            target: aarch64-apple-darwin
+            manylinux: "off"
+            artifact: macos-arm64
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up build Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Build wheel
+        env:
+          MACOSX_DEPLOYMENT_TARGET: ${{ contains(matrix.target, 'apple-darwin') && '13.0' || '' }}
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          maturin-version: v1.14.1
+          args: --release --out dist --compatibility pypi
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          before-script-linux: |
+            dnf install --assumeyes \
+              pkgconf-pkg-config \
+              clang-devel \
+              libxcb-devel \
+              libXrandr-devel \
+              dbus-devel \
+              pipewire-devel \
+              wayland-devel \
+              mesa-libgbm-devel \
+              mesa-libEGL-devel
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheel-${{ matrix.artifact }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  test-wheels:
+    name: Install ${{ matrix.artifact }} artifact
+    needs: build-wheels
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            artifact: linux-x86_64
+          - os: windows-2022
+            artifact: windows-x86_64
+          - os: macos-15-intel
+            artifact: macos-x86_64
+          - os: macos-15
+            artifact: macos-arm64
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: wheel-${{ matrix.artifact }}
+          path: dist
+
+      - name: Install wheel dependencies
+        run: python -m pip install --upgrade pip Pillow imageio-ffmpeg
+
+      - name: Install wheel without building from source
+        run: python -m pip install --no-index --no-deps --find-links dist windowpulse
+
+      - name: Smoke-test package and commands
+        run: |
+          python -c "import windowpulse; from PIL import Image; assert windowpulse.WindowRecorder; assert Image.Image"
+          windowpulse-video --help
+          windowpulse-watch --help

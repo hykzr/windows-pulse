@@ -1,0 +1,33 @@
+[package]
+name = "windowpulse-native"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Native window capture backend for the WindowPulse Python package"
+license = "MIT"
+publish = false
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.29.0", features = ["abi3-py310", "extension-module"] }
+
+[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
+image = { version = "=0.25.8", default-features = false }
+xcap = { version = "=0.9.6", default-features = false }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-capture = "=2.0.0"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-graphics = { version = "=0.3.2", default-features = false, features = [
+    "CGWindow",
+] }
+screencapturekit = "=8.0.0"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "symbols"

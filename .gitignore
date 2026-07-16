@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Environments and package output
+.venv/
+venv/
+build/
+dist/
+
+# Rust
+target/
+*.pdb
+
+# Native extension output
+*.dylib
+*.pyd
+*.so
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Example recordings
+recordings/
+*.mp4
+*.webm
+*.mov

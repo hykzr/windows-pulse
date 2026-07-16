@@ -1,0 +1,79 @@
+[build-system]
+requires = ["maturin>=1.14,<2"]
+build-backend = "maturin"
+
+[project]
+name = "windowpulse"
+version = "0.1.0"
+description = "Fast, change-aware capture of one background window"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "WindowPulse contributors" }]
+keywords = ["window", "capture", "recording", "screenshot", "pillow"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: MacOS :: MacOS X",
+  "Operating System :: Microsoft :: Windows :: Windows 10",
+  "Operating System :: Microsoft :: Windows :: Windows 11",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Rust",
+  "Typing :: Typed",
+]
+dependencies = ["Pillow>=10.0"]
+
+[project.optional-dependencies]
+video = ["imageio-ffmpeg>=0.6"]
+dev = [
+  "imageio-ffmpeg>=0.6",
+  "maturin>=1.14,<2",
+  "pyright>=1.1.411",
+  "pytest>=9.1",
+  "pytest-timeout>=2.3",
+  "ruff>=0.12",
+]
+
+[project.scripts]
+windowpulse-video = "windowpulse.cli:video_main"
+windowpulse-watch = "windowpulse.cli:watch_main"
+
+[tool.maturin]
+bindings = "pyo3"
+module-name = "windowpulse._native"
+python-source = "python"
+features = ["pyo3/extension-module"]
+strip = true
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.pyright]
+include = ["python"]
+pythonVersion = "3.10"
+typeCheckingMode = "basic"
+reportMissingImports = "error"
+reportInvalidTypeForm = "error"
+reportOverlappingOverload = "error"
+reportUntypedFunctionDecorator = "warning"
+reportPrivateUsage = "warning"
+reportUnusedImport = "none"
