@@ -9,6 +9,11 @@ import json
 import sys
 from collections.abc import Sequence
 
+from rich import box
+from rich.console import Console
+from rich.table import Table
+from rich.text import Text
+
 from .errors import WindowPulseError
 from .models import (
     CaptureOptions,
@@ -22,6 +27,8 @@ from .models import (
 from .recorder import WindowRecorder
 from .video import WindowVideoRecorder
 from .windows import find_window, get_window, list_windows
+
+_CONTROL_CENTER_BUNDLE_ID = "com.apple.controlcenter"
 
 
 def _region(value: str) -> Region:
@@ -90,17 +97,35 @@ def _add_common_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _is_hidden_window(window: WindowInfo) -> bool:
+    if window.size == (1, 1):
+        return True
+    return window.bundle_id.casefold() == _CONTROL_CENTER_BUNDLE_ID
+
+
 def _print_windows() -> None:
-    for window in list_windows():
+    windows = list_windows()
+
+    table = Table(box=box.SIMPLE_HEAD, pad_edge=False)
+    table.add_column("ID", min_width=5, justify="right", style="cyan", no_wrap=True)
+    table.add_column("PID", min_width=5, justify="right", no_wrap=True)
+    table.add_column("Size", min_width=9, justify="right", no_wrap=True)
+    table.add_column("Application", min_width=8, max_width=20, overflow="ellipsis")
+    table.add_column("Title", min_width=8, overflow="ellipsis")
+
+    for window in windows:
+        if _is_hidden_window(window):
+            continue
         size = "?x?" if window.size is None else f"{window.size[0]}x{window.size[1]}"
-        line = f"{window.id}\t{window.pid or '-'}\t{size}\t{window.app_name}\t{window.title}\n"
-        buffer = getattr(sys.stdout, "buffer", None)
-        if buffer is None:
-            sys.stdout.write(line)
-        else:
-            encoding = sys.stdout.encoding or "utf-8"
-            buffer.write(line.encode(encoding, errors="backslashreplace"))
-    sys.stdout.flush()
+        table.add_row(
+            str(window.id),
+            str(window.pid or "-"),
+            size,
+            Text(window.app_name, no_wrap=True, overflow="ellipsis"),
+            Text(window.title, no_wrap=True, overflow="ellipsis"),
+        )
+
+    Console(file=sys.stdout, highlight=False).print(table)
 
 
 def _select_window(parser: argparse.ArgumentParser, args: argparse.Namespace) -> WindowInfo:

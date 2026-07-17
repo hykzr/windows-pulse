@@ -25,6 +25,7 @@ def list_windows(*, include_untitled: bool = False) -> list[WindowInfo]:
                 pid=item.pid,
                 title=item.title,
                 app_name=item.app_name,
+                bundle_id=item.bundle_id,
                 bounds=bounds,
                 is_minimized=item.is_minimized,
                 is_maximized=item.is_maximized,

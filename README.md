@@ -112,6 +112,8 @@ Window metadata may change while an application moves or resizes. Call
 `window.refresh()` for an updated `WindowInfo`. `window.bounds` is a `Region`
 in screen coordinates (or `None` when the backend cannot report it), and
 `window.size` is the current `(width, height)` pair when known.
+`window.bundle_id` identifies the owning application when the backend provides
+one (currently macOS); otherwise it is an empty string.
 
 ## Crop within the window
 

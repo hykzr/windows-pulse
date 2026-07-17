@@ -151,6 +151,7 @@ class WindowInfo:
     is_minimized: bool | None = None
     is_maximized: bool | None = None
     is_focused: bool | None = None
+    bundle_id: str = ""
 
     @property
     def position(self) -> tuple[int, int] | None:

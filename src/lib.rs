@@ -15,7 +15,7 @@ use xcap::Window;
 use screencapturekit::prelude::*;
 #[cfg(target_os = "macos")]
 use screencapturekit::stream::delegate_trait::StreamCallbacks;
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use std::ffi::c_void;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use std::sync::{Arc, Condvar, Mutex};
@@ -40,6 +40,7 @@ struct NativeWindowInfo {
     pid: Option<u32>,
     title: String,
     app_name: String,
+    bundle_id: String,
     x: Option<i32>,
     y: Option<i32>,
     width: Option<u32>,
@@ -51,6 +52,39 @@ struct NativeWindowInfo {
 
 fn runtime_error(context: &str, error: impl std::fmt::Display) -> PyErr {
     PyRuntimeError::new_err(format!("{context}: {error}"))
+}
+
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    fn proc_pidpath(pid: i32, buffer: *mut c_void, buffersize: u32) -> i32;
+}
+
+#[cfg(target_os = "macos")]
+fn executable_is_window_server(path: &[u8]) -> bool {
+    let path = path.split(|byte| *byte == 0).next().unwrap_or(path);
+    path.rsplit(|byte| *byte == b'/').next() == Some(b"WindowServer")
+}
+
+#[cfg(target_os = "macos")]
+fn is_window_server_process(pid: u32) -> bool {
+    const MAX_PATH_SIZE: usize = 4096;
+
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
+    let mut path = [0_u8; MAX_PATH_SIZE];
+    // SAFETY: `path` is writable for the supplied size and remains alive for the call.
+    let length = unsafe {
+        proc_pidpath(
+            pid,
+            path.as_mut_ptr().cast::<c_void>(),
+            MAX_PATH_SIZE as u32,
+        )
+    };
+    let Ok(length) = usize::try_from(length) else {
+        return false;
+    };
+    length > 0 && length <= path.len() && executable_is_window_server(&path[..length])
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -82,15 +116,24 @@ fn list_windows_native() -> PyResult<Vec<NativeWindowInfo>> {
                     return None;
                 }
                 let application = window.owning_application();
+                let pid = application
+                    .as_ref()
+                    .and_then(|app| u32::try_from(app.process_id()).ok());
+                // Window titles and application display names may be localized, but the
+                // WindowServer executable name is stable across system languages.
+                if pid.is_some_and(is_window_server_process) {
+                    return None;
+                }
                 Some(NativeWindowInfo {
                     id: window.window_id(),
-                    pid: application
-                        .as_ref()
-                        .and_then(|app| u32::try_from(app.process_id()).ok()),
+                    pid,
                     title: window.title().unwrap_or_default(),
                     app_name: application
                         .as_ref()
                         .map_or_else(String::new, SCRunningApplication::application_name),
+                    bundle_id: application
+                        .as_ref()
+                        .map_or_else(String::new, SCRunningApplication::bundle_identifier),
                     x: Some(frame.origin.x.floor() as i32),
                     y: Some(frame.origin.y.floor() as i32),
                     width: Some(frame.size.width.ceil() as u32),
@@ -116,6 +159,7 @@ fn list_windows_native() -> PyResult<Vec<NativeWindowInfo>> {
                     pid: window.pid().ok(),
                     title: window.title().unwrap_or_default(),
                     app_name: window.app_name().unwrap_or_default(),
+                    bundle_id: String::new(),
                     x: window.x().ok(),
                     y: window.y().ok(),
                     width: window.width().ok(),
@@ -964,4 +1008,19 @@ fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(request_permission, module)?)?;
     module.add_function(wrap_pyfunction!(backend_name, module)?)?;
     Ok(())
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::executable_is_window_server;
+
+    #[test]
+    fn identifies_window_server_by_executable_basename() {
+        assert!(executable_is_window_server(
+            b"/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer\0"
+        ));
+        assert!(!executable_is_window_server(
+            b"/Applications/WindowServer Helper"
+        ));
+    }
 }

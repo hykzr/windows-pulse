@@ -414,7 +414,22 @@ def test_cli_list_windows_needs_no_selector_or_video_output(
                 title="Quarterly Review",
                 app_name="Slides",
                 bounds=Region(10, 20, 1280, 720),
-            )
+            ),
+            WindowInfo(
+                id=45,
+                pid=456,
+                title="Invisible helper",
+                app_name="Helper",
+                bounds=Region(0, 0, 1, 1),
+            ),
+            WindowInfo(
+                id=46,
+                pid=768,
+                title="WLAN",
+                app_name="Kontrollzentrum",
+                bounds=Region(0, 0, 38, 29),
+                bundle_id="com.apple.controlcenter",
+            ),
         ],
     )
 
@@ -422,5 +437,17 @@ def test_cli_list_windows_needs_no_selector_or_video_output(
 
     captured = capsys.readouterr()
     assert result == 0
-    assert captured.out == "42\t123\t1280x720\tSlides\tQuarterly Review\n"
+    assert "ID" in captured.out
+    assert "PID" in captured.out
+    assert "Size" in captured.out
+    assert "Application" in captured.out
+    assert "Title" in captured.out
+    assert "42" in captured.out
+    assert "123" in captured.out
+    assert "1280x720" in captured.out
+    assert "Slides" in captured.out
+    assert "Quarterly Review" in captured.out
+    assert "Invisible helper" not in captured.out
+    assert "Kontrollzentrum" not in captured.out
+    assert "WLAN" not in captured.out
     assert captured.err == ""
