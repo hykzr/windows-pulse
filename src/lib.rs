@@ -55,6 +55,16 @@ fn runtime_error(context: &str, error: impl std::fmt::Display) -> PyErr {
 }
 
 #[cfg(target_os = "macos")]
+fn initialize_core_graphics() {
+    // ScreenCaptureKit may call CoreGraphics APIs that assume the window server
+    // connection has already been initialized. GUI applications do this as part
+    // of AppKit startup, but Python command-line processes do not.
+    // SAFETY: This function takes no arguments and only forces CoreGraphics to
+    // initialize its process-wide connection by calling CGMainDisplayID().
+    unsafe { screencapturekit::ffi::sc_initialize_core_graphics() }
+}
+
+#[cfg(target_os = "macos")]
 unsafe extern "C" {
     fn proc_pidpath(pid: i32, buffer: *mut c_void, buffersize: u32) -> i32;
 }
@@ -1000,6 +1010,9 @@ impl Drop for NativeCapturer {
 
 #[pymodule]
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    #[cfg(target_os = "macos")]
+    initialize_core_graphics();
+
     module.add_class::<NativeWindowInfo>()?;
     module.add_class::<NativeCapturer>()?;
     module.add_function(wrap_pyfunction!(list_windows_native, module)?)?;

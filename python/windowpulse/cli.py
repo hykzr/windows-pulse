@@ -249,7 +249,7 @@ def video_main(argv: Sequence[str] | None = None) -> int:
     try:
         window = _select_window(parser, args)
         capture, changes, queue = _configs(parser, args)
-        output = WindowVideoRecorder(
+        recorder = WindowVideoRecorder(
             window,
             args.output,
             capture=capture,
@@ -257,8 +257,10 @@ def video_main(argv: Sequence[str] | None = None) -> int:
             queue_options=queue,
             video_fps=args.video_fps,
             codec=args.codec,
-        ).record(duration=args.duration)
-        print(output, file=sys.stderr)
+        )
+        print("Recording started. Press Ctrl+C to stop.", file=sys.stderr, flush=True)
+        output = recorder.record(duration=args.duration)
+        print(f"Recording stopped: {output}", file=sys.stderr, flush=True)
         return 0
     except (WindowPulseError, OSError, ValueError) as error:
         print(f"windowpulse-video: {error}", file=sys.stderr)

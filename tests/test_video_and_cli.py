@@ -4,6 +4,7 @@ import base64
 import io
 import json
 import sys
+import time
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from types import SimpleNamespace
@@ -164,6 +165,47 @@ def test_video_pads_odd_dimensions_with_black_pixels(
         (0, 0, 0),
     ]
     assert [encoded.getpixel((x, 1)) for x in range(4)] == [(0, 0, 0)] * 4
+
+
+def test_video_ctrl_c_stops_and_finalizes_recording(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _calls, writers = install_fake_imageio(monkeypatch)
+    video = WindowVideoRecorder(WindowInfo(id=7, title="Deck"), tmp_path / "deck.mp4")
+
+    class FakeRecorder:
+        is_running = True
+
+        def __init__(self) -> None:
+            self.stop_calls: list[dict[str, object]] = []
+
+        def stop(self, **kwargs: object) -> None:
+            self.stop_calls.append(dict(kwargs))
+
+        def raise_if_failed(self) -> None:
+            pass
+
+    recorder = FakeRecorder()
+    video.recorder = recorder  # type: ignore[assignment]
+
+    def start() -> WindowVideoRecorder:
+        video._started = True
+        video._start_monotonic = time.monotonic()
+        video._start_wall_time = time.time()
+        video._handle_frame(CapturedFrame(time.time(), Image.new("RGBA", (2, 2), "red")))
+        return video
+
+    monkeypatch.setattr(video, "start", start)
+
+    def interrupt(_seconds: float) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("windowpulse.video.time.sleep", interrupt)
+
+    assert video.record() == tmp_path / "deck.mp4"
+    assert recorder.stop_calls == [{"timeout": 5.0, "drain_handlers": True}]
+    assert writers[0].closed
 
 
 def test_watch_jsonl_framing_and_title_config_forwarding(
@@ -345,7 +387,9 @@ def test_video_cli_forwards_id_capture_and_encoder_configuration(
     captured = capsys.readouterr()
     assert result == 0
     assert captured.out == ""
-    assert captured.err == "movie.mp4\n"
+    assert captured.err == (
+        "Recording started. Press Ctrl+C to stop.\nRecording stopped: movie.mp4\n"
+    )
     assert selected == [77]
     assert instances[0].window is window
     assert instances[0].output == "movie.mp4"

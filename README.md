@@ -293,6 +293,10 @@ windowpulse-video presentation.mp4 \
   --codec libx264
 ```
 
+Omit `--duration` to record until the target window closes or you press
+`Ctrl+C`. Interrupting this way stops capture gracefully and finalizes the
+video file before the command exits.
+
 ### Stream changed frames to stdout
 
 `windowpulse-watch` emits only frames accepted by change detection and stable
