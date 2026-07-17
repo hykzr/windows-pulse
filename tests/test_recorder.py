@@ -16,6 +16,7 @@ from windowpulse.models import (
     CaptureOptions,
     ChangeDetectionOptions,
     OutputResolution,
+    QueueOptions,
     RecorderState,
     Region,
     WindowInfo,
@@ -37,6 +38,7 @@ def install_fake_backend(
     frames: Sequence[NativeResult],
     *,
     constructor_error: BaseException | None = None,
+    window_closes: bool = False,
 ) -> tuple[type[Any], list[Any]]:
     instances: list[Any] = []
 
@@ -48,6 +50,7 @@ def install_fake_backend(
             self.frames = list(frames)
             self.index = 0
             self.stopped = False
+            self.window_closed = False
             instances.append(self)
 
         def next_frame(self, *args: object, **kwargs: object) -> NativeResult:
@@ -55,6 +58,9 @@ def install_fake_backend(
             if self.index < len(self.frames):
                 frame = self.frames[self.index]
                 self.index += 1
+            elif window_closes:
+                self.window_closed = True
+                frame = None
             else:
                 frame = self.frames[-1]
             # Keep the worker responsive without busy-spinning on quiet-backend polls.
@@ -67,6 +73,10 @@ def install_fake_backend(
         @property
         def is_stopped(self) -> bool:
             return self.stopped
+
+        @property
+        def is_window_closed(self) -> bool:
+            return self.window_closed
 
     monkeypatch.setattr(recorder_module._native, "NativeCapturer", FakeNativeCapturer)
     monkeypatch.setattr(recorder_module, "is_supported", lambda: True)
@@ -120,6 +130,7 @@ def test_recorder_worker_filters_frames_and_enqueues_owned_pillow_images(
     assert instances[0].args == (42, 60, True, True, (1, 1, 2, 2), "720p")
     assert instances[0].stopped
     assert recorder.state is RecorderState.STOPPED
+    assert not recorder.is_window_closed()
     assert recorder.queue.closed
     assert recorder.stats.captured >= 3
     assert recorder.stats.emitted == 2
@@ -200,7 +211,57 @@ def test_start_checks_support_and_permission_before_spawning(
 
 def test_stopping_an_unstarted_recorder_is_idempotent() -> None:
     recorder = WindowRecorder(WindowInfo(id=42, title="Deck"))
+    assert not recorder.is_window_closed()
     recorder.stop()
     recorder.stop()
     assert recorder.state is RecorderState.STOPPED
     assert recorder.queue.closed
+    assert not recorder.is_window_closed()
+
+
+def test_window_close_stops_normally_and_preserves_pending_frames_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_fake_backend(
+        monkeypatch,
+        [rgba_frame(1.0, 0), rgba_frame(2.0, 255)],
+        window_closes=True,
+    )
+    recorder = WindowRecorder(WindowInfo(id=42, title="Deck"))
+
+    recorder.start(timeout=1.0)
+    deadline = time.monotonic() + 1.0
+    while recorder.is_running and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    assert recorder.state is RecorderState.STOPPED
+    assert recorder.is_window_closed()
+    assert recorder.queue.closed
+    assert [frame.timestamp for frame in recorder] == [1.0, 2.0]
+    recorder.stop(timeout=1.0)
+
+
+def test_window_close_can_discard_pending_frames(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_fake_backend(
+        monkeypatch,
+        [rgba_frame(1.0, 0), rgba_frame(2.0, 255)],
+        window_closes=True,
+    )
+    recorder = WindowRecorder(
+        WindowInfo(id=42, title="Deck"),
+        queue_options=QueueOptions(clear_on_window_close=True),
+    )
+
+    recorder.start(timeout=1.0)
+    deadline = time.monotonic() + 1.0
+    while recorder.is_running and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    assert recorder.state is RecorderState.STOPPED
+    assert recorder.is_window_closed()
+    assert recorder.queue.closed
+    assert recorder.queue.empty()
+    assert recorder.stats.emitted == 2
+    assert recorder.stats.dropped == 2

@@ -117,6 +117,7 @@ class QueueOptions:
 
     max_size: int | None = None
     full_policy: QueueFullPolicy = QueueFullPolicy.BLOCK
+    clear_on_window_close: bool = False
 
     def __post_init__(self) -> None:
         if self.max_size is not None and (
@@ -127,6 +128,8 @@ class QueueOptions:
             raise ValueError("max_size must be a positive integer or None")
         if not isinstance(self.full_policy, QueueFullPolicy):
             object.__setattr__(self, "full_policy", QueueFullPolicy(self.full_policy))
+        if not isinstance(self.clear_on_window_close, bool):
+            raise TypeError("clear_on_window_close must be a boolean")
 
 
 class CapturedFrame(NamedTuple):

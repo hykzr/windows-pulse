@@ -207,6 +207,7 @@ def test_watch_jsonl_framing_and_title_config_forwarding(
             "2",
             "--queue-full",
             "drop_oldest",
+            "--clear-queue-on-window-close",
             "--format",
             "jsonl",
         ]
@@ -234,6 +235,7 @@ def test_watch_jsonl_framing_and_title_config_forwarding(
         "queue_options": QueueOptions(
             max_size=2,
             full_policy=QueueFullPolicy.DROP_OLDEST,
+            clear_on_window_close=True,
         ),
     }
 

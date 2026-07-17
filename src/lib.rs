@@ -256,6 +256,28 @@ enum CaptureMessage {
     Error(String),
 }
 
+#[cfg(target_os = "macos")]
+fn mac_window_exists(window_id: u32) -> PyResult<bool> {
+    let content = SCShareableContent::create()
+        .with_exclude_desktop_windows(true)
+        .with_on_screen_windows_only(false)
+        .get()
+        .map_err(|error| runtime_error("failed to query ScreenCaptureKit windows", error))?;
+    Ok(content
+        .windows()
+        .into_iter()
+        .any(|window| window.window_id() == window_id))
+}
+
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+enum CapturePoll {
+    Frame(RawFrame),
+    #[cfg(target_os = "windows")]
+    Closed,
+    Error(String),
+    Empty,
+}
+
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 #[derive(Default)]
 struct MailboxState {
@@ -296,7 +318,7 @@ impl LatestFrameMailbox {
         self.ready.notify_all();
     }
 
-    fn receive(&self, timeout: Duration) -> PyResult<Option<RawFrame>> {
+    fn receive(&self, timeout: Duration) -> CapturePoll {
         let mut state = self
             .state
             .lock()
@@ -309,13 +331,11 @@ impl LatestFrameMailbox {
             state = result.0;
         }
         match state.message.take() {
-            Some(CaptureMessage::Frame(frame)) => Ok(Some(frame)),
+            Some(CaptureMessage::Frame(frame)) => CapturePoll::Frame(frame),
             #[cfg(target_os = "windows")]
-            Some(CaptureMessage::Closed) => {
-                Err(PyRuntimeError::new_err("captured window was closed"))
-            }
-            Some(CaptureMessage::Error(error)) => Err(PyRuntimeError::new_err(error)),
-            None => Ok(None),
+            Some(CaptureMessage::Closed) => CapturePoll::Closed,
+            Some(CaptureMessage::Error(error)) => CapturePoll::Error(error),
+            None => CapturePoll::Empty,
         }
     }
 }
@@ -530,11 +550,13 @@ impl SCStreamOutputTrait for MacFrameHandler {
 struct MacBackend {
     stream: SCStream,
     mailbox: Arc<LatestFrameMailbox>,
+    window_id: u32,
 }
 
 #[cfg(target_os = "linux")]
 struct SnapshotBackend {
     window: Window,
+    window_id: u32,
     crop: Option<(u32, u32, u32, u32)>,
     resolution: OutputResolution,
     frame_interval: Duration,
@@ -550,6 +572,7 @@ struct NativeCapturer {
     #[cfg(target_os = "linux")]
     backend: Option<SnapshotBackend>,
     stopped: bool,
+    window_closed: bool,
 }
 
 #[pymethods]
@@ -619,6 +642,7 @@ impl NativeCapturer {
                     resolution,
                 }),
                 stopped: false,
+                window_closed: false,
             })
         }
 
@@ -709,8 +733,13 @@ impl NativeCapturer {
                 .start_capture()
                 .map_err(|error| runtime_error("failed to start ScreenCaptureKit", error))?;
             Ok(Self {
-                backend: Some(MacBackend { stream, mailbox }),
+                backend: Some(MacBackend {
+                    stream,
+                    mailbox,
+                    window_id,
+                }),
                 stopped: false,
+                window_closed: false,
             })
         }
 
@@ -730,12 +759,14 @@ impl NativeCapturer {
             Ok(Self {
                 backend: Some(SnapshotBackend {
                     window,
+                    window_id,
                     crop,
                     resolution,
                     frame_interval: Duration::from_secs_f64(1.0 / f64::from(fps)),
                     next_due: Instant::now(),
                 }),
                 stopped: false,
+                window_closed: false,
             })
         }
 
@@ -753,6 +784,9 @@ impl NativeCapturer {
     fn next_frame(&mut self, py: Python<'_>) -> PyResult<Option<PythonFrame>> {
         if self.stopped {
             return Err(PyRuntimeError::new_err("capturer has been stopped"));
+        }
+        if self.window_closed {
+            return Ok(None);
         }
         let Some(frame) = py.detach(|| self.next_frame_inner())? else {
             return Ok(None);
@@ -775,6 +809,11 @@ impl NativeCapturer {
     fn is_stopped(&self) -> bool {
         self.stopped
     }
+
+    #[getter]
+    fn is_window_closed(&self) -> bool {
+        self.window_closed
+    }
 }
 
 impl NativeCapturer {
@@ -784,10 +823,15 @@ impl NativeCapturer {
             .backend
             .as_ref()
             .ok_or_else(|| PyRuntimeError::new_err("capturer has been stopped"))?;
-        let frame = backend.mailbox.receive(Duration::from_millis(100))?;
-        frame
-            .map(|frame| resize_frame(frame, backend.resolution))
-            .transpose()
+        match backend.mailbox.receive(Duration::from_millis(100)) {
+            CapturePoll::Frame(frame) => resize_frame(frame, backend.resolution).map(Some),
+            CapturePoll::Closed => {
+                self.window_closed = true;
+                Ok(None)
+            }
+            CapturePoll::Error(error) => Err(PyRuntimeError::new_err(error)),
+            CapturePoll::Empty => Ok(None),
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -796,7 +840,18 @@ impl NativeCapturer {
             .backend
             .as_ref()
             .ok_or_else(|| PyRuntimeError::new_err("capturer has been stopped"))?;
-        backend.mailbox.receive(Duration::from_millis(100))
+        let window_id = backend.window_id;
+        match backend.mailbox.receive(Duration::from_millis(100)) {
+            CapturePoll::Frame(frame) => Ok(Some(frame)),
+            CapturePoll::Error(error) => {
+                if !mac_window_exists(window_id)? {
+                    self.window_closed = true;
+                    return Ok(None);
+                }
+                Err(PyRuntimeError::new_err(error))
+            }
+            CapturePoll::Empty => Ok(None),
+        }
     }
 
     #[cfg(target_os = "linux")]
@@ -811,10 +866,20 @@ impl NativeCapturer {
         }
         backend.next_due = Instant::now() + backend.frame_interval;
 
-        let image = backend
-            .window
-            .capture_image()
-            .map_err(|error| runtime_error("failed to capture window", error))?;
+        let image = match backend.window.capture_image() {
+            Ok(image) => image,
+            Err(error) => {
+                let window_exists = Window::all()
+                    .map_err(|list_error| runtime_error("failed to enumerate windows", list_error))?
+                    .into_iter()
+                    .any(|window| window.id().ok() == Some(backend.window_id));
+                if !window_exists {
+                    self.window_closed = true;
+                    return Ok(None);
+                }
+                return Err(runtime_error("failed to capture window", error));
+            }
+        };
         let image = if let Some((x, y, width, height)) = backend.crop {
             let right = x.checked_add(width).ok_or_else(|| {
                 PyValueError::new_err("crop coordinates overflow the frame bounds")

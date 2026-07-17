@@ -68,6 +68,7 @@ recorder = WindowRecorder(
     queue_options=QueueOptions(
         max_size=32,
         full_policy=QueueFullPolicy.DROP_OLDEST,
+        clear_on_window_close=False,
     ),
 )
 
@@ -77,8 +78,11 @@ with recorder:
         packet.image.save("latest.png")
 ```
 
-Stop the loop with Ctrl+C or call `recorder.stop()` from another thread. An
-iterator finishes after the recorder has stopped and its queue has drained.
+Stop the loop with Ctrl+C or call `recorder.stop()` from another thread. Closing
+the target window also stops the recorder normally; `recorder.is_window_closed()`
+distinguishes that case from an explicit stop. An iterator finishes after the
+recorder has stopped and its queue has drained. Set
+`QueueOptions(clear_on_window_close=True)` to discard pending frames instead.
 
 Iteration acknowledges each packet automatically after the loop body finishes.
 For direct queue-style consumption, use `recorder.get(timeout=...)`, followed

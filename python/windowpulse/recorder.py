@@ -62,6 +62,7 @@ class WindowRecorder:
         self._last_difference: float | None = None
         self._worker: threading.Thread | None = None
         self._stop_event = threading.Event()
+        self._window_closed_event = threading.Event()
         self._ready_event = threading.Event()
         self._error: BaseException | None = None
         self._backend: _native.NativeCapturer | None = None
@@ -95,6 +96,10 @@ class WindowRecorder:
     @property
     def is_running(self) -> bool:
         return self.state is RecorderState.RUNNING
+
+    def is_window_closed(self) -> bool:
+        """Return whether capture ended because the target window was closed."""
+        return self._window_closed_event.is_set()
 
     @property
     def stats(self) -> RecorderStats:
@@ -148,6 +153,12 @@ class WindowRecorder:
             while not self._stop_event.is_set():
                 native_frame = self._backend.next_frame()
                 if native_frame is None:
+                    if self._backend.is_window_closed:
+                        if not self._stop_event.is_set():
+                            self._window_closed_event.set()
+                            if self.queue_options.clear_on_window_close:
+                                self.queue.discard_pending()
+                        break
                     result = detector.poll(time.monotonic())
                     if result.frame is not None:
                         self._enqueue(result.frame)
@@ -199,6 +210,9 @@ class WindowRecorder:
             self.queue.close()
             return
         if state is RecorderState.STOPPED:
+            for pool in self._handler_pools:
+                pool.stop(drain=drain_handlers, timeout=timeout)
+            self.raise_if_failed()
             return
         if state is not RecorderState.FAILED:
             self._set_state(RecorderState.STOPPING)

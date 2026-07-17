@@ -139,6 +139,8 @@ def test_configuration_models_coerce_enums_and_validate_boundaries() -> None:
         ChangeDetectionOptions(threshold=float("nan"))
     with pytest.raises(ValueError, match="max_size"):
         QueueOptions(max_size=0)
+    with pytest.raises(TypeError, match="clear_on_window_close"):
+        QueueOptions(clear_on_window_close=1)  # type: ignore[arg-type]
 
 
 def test_captured_frame_is_an_unpackable_timestamp_and_pillow_image() -> None:

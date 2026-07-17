@@ -83,6 +83,11 @@ def _add_common_options(parser: argparse.ArgumentParser) -> None:
         default=QueueFullPolicy.BLOCK.value,
         help="bounded queue overflow policy",
     )
+    parser.add_argument(
+        "--clear-queue-on-window-close",
+        action="store_true",
+        help="discard pending frames when the target window closes",
+    )
 
 
 def _print_windows() -> None:
@@ -133,6 +138,7 @@ def _configs(
         QueueOptions(
             max_size=args.max_queue,
             full_policy=QueueFullPolicy(args.queue_full),
+            clear_on_window_close=args.clear_queue_on_window_close,
         ),
     )
 
