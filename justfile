@@ -1,5 +1,7 @@
 set windows-shell := ["pwsh.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-NoLogo", "-Command"]
 
+macos-build-env := if os() == "macos" { "CARGO_TARGET_DIR=target/macos-13 MACOSX_DEPLOYMENT_TARGET=13.0" } else { "" }
+
 # List the available commands.
 default:
     @just --list
@@ -10,11 +12,11 @@ setup:
 
 # Compile and install the native extension into .venv for local development.
 compile *flags: setup
-    uv run --no-sync maturin develop --uv --extras video {{ flags }}
+    {{ macos-build-env }} uv run --no-sync maturin develop --uv --extras video {{ flags }}
 
 # Build a release wheel in dist/.
 build *flags: setup
-    {{ if os() == "macos" { "MACOSX_DEPLOYMENT_TARGET=13.0" } else { "" } }} uv run --no-sync maturin build --release --out dist {{ flags }}
+    {{ macos-build-env }} uv run --no-sync maturin build --release --out dist {{ flags }}
 
 # Run the Python test suite (extra pytest arguments are accepted).
 test *flags: compile
