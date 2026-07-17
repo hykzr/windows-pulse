@@ -14,7 +14,7 @@ concurrency:
 jobs:
   checks:
     name: Lint and test
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -74,7 +74,7 @@ jobs:
         include:
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            manylinux: "2_28"
+            manylinux: "2_34"
             artifact: linux-x86_64
           - os: windows-2022
             target: x86_64-pc-windows-msvc
@@ -96,6 +96,10 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.10"
+
+      - name: Select Xcode 26.2
+        if: contains(matrix.target, 'apple-darwin')
+        run: sudo xcode-select --switch /Applications/Xcode_26.2.app
 
       - name: Build wheel
         env:

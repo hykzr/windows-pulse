@@ -39,3 +39,6 @@ recordings/
 *.mp4
 *.webm
 *.mov
+
+temp/
+.tmp-*
