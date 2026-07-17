@@ -14,7 +14,7 @@ compile *flags: setup
 
 # Build a release wheel in dist/.
 build *flags: setup
-    uv run --no-sync maturin build --release --out dist {{ flags }}
+    {{ if os() == "macos" { "MACOSX_DEPLOYMENT_TARGET=13.0" } else { "" } }} uv run --no-sync maturin build --release --out dist {{ flags }}
 
 # Run the Python test suite (extra pytest arguments are accepted).
 test *flags: compile
